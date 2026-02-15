@@ -25,17 +25,11 @@
     .suc{color:green;margin-left:8px;font-weight:600}
     @media(max-width:640px){.row{flex-direction:column;align-items:stretch}input[type=number],input[type=date]{width:100%}}
   </style>
-  <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#0366d6">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="매출정리">
-  <link rel="apple-touch-icon" href="/img/module_table_top.png">
 </head>
 <body>
   <h1>알바 매출 간편 정리 도구</h1>
   <div class="card">
-    <p class="small">날짜별로 배민 · 쿠팡 · 땡겨요 · 홀 매출을 입력하면 총합을 자동 계산하고 브라우저에 저장합니다. 런치와 디너는 각각 별도로 입력·표기됩니다.</p>
+    <p class="small">날짜별로 배민 · 쿠팡 · 땡겨요 · 홀 매출을 입력하면 총합을 자동 계산하고 브라우저에 저장합니다. 디너는 런치와 합산된 누적값으로 표기됩니다.</p>
 
     <div style="margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;align-items:end">
       <div>
@@ -169,7 +163,7 @@
     // 유틸: 날짜로 항목 찾기
     function findEntry(arr, date){ return arr.find(x => x.date === date); }
 
-    // 렌더링: 날짜별로 런치/디너 행 표시
+    // 렌더링: 날짜별로 런치/디너(누적) 행 표시
     function renderTable(){
       const entries = loadEntries();
       historyTbody.innerHTML = '';
@@ -195,17 +189,25 @@
           historyTbody.appendChild(tr);
         }
 
-        // 디너 행 — 디너는 런치와 별도로 표시
+        // 디너(누적) 행 — 디너가 저장되어 있을 때만 표시, 값은 런치+디너
         if(e.dinner){
+          const lb = e.lunch || {baemin:0,coupang:0,ttaeng:0,hall:0,total:0};
           const db = e.dinner;
+          const cum = {
+            baemin: (Number(lb.baemin)||0) + (Number(db.baemin)||0),
+            coupang: (Number(lb.coupang)||0) + (Number(db.coupang)||0),
+            ttaeng: (Number(lb.ttaeng)||0) + (Number(db.ttaeng)||0),
+            hall: (Number(lb.hall)||0) + (Number(db.hall)||0)
+          };
+          cum.total = cum.baemin + cum.coupang + cum.ttaeng + cum.hall;
           const tr2 = document.createElement('tr');
           tr2.innerHTML = `
-            <td>${e.date} (디너)</td>
-            <td>${formatNum(db.baemin)}</td>
-            <td>${formatNum(db.coupang)}</td>
-            <td>${formatNum(db.ttaeng)}</td>
-            <td>${formatNum(db.hall)}</td>
-            <td class="right">${formatNum(db.total)}</td>
+            <td>${e.date} (디너 — 누적)</td>
+            <td>${formatNum(cum.baemin)}</td>
+            <td>${formatNum(cum.coupang)}</td>
+            <td>${formatNum(cum.ttaeng)}</td>
+            <td>${formatNum(cum.hall)}</td>
+            <td class="right">${formatNum(cum.total)}</td>
             <td>
               <button data-idx="${idx}" data-shift="dinner" class="ghost rowCopy">복사</button>
               <button data-idx="${idx}" data-shift="dinner" class="danger rowDel">삭제</button>
@@ -225,7 +227,11 @@
           if(!entry) return;
           if(shift === 'lunch' && entry.lunch) copyEntryText({ date: entry.date, shiftLabel: '런치', ...entry.lunch });
           if(shift === 'dinner' && entry.dinner){
-            copyEntryText({ date: entry.date, shiftLabel: '디너', ...entry.dinner });
+            const lb = entry.lunch || {baemin:0,coupang:0,ttaeng:0,hall:0,total:0};
+            const db = entry.dinner;
+            const cum = { date: entry.date, shiftLabel: '디너(누적)', baemin: (Number(lb.baemin)||0)+(Number(db.baemin)||0), coupang: (Number(lb.coupang)||0)+(Number(db.coupang)||0), ttaeng: (Number(lb.ttaeng)||0)+(Number(db.ttaeng)||0), hall: (Number(lb.hall)||0)+(Number(db.hall)||0) };
+            cum.total = cum.baemin + cum.coupang + cum.ttaeng + cum.hall;
+            copyEntryText(cum);
           }
         };
       });
@@ -253,17 +259,12 @@
     function formatNum(n){ return Number(n).toLocaleString('ko-KR'); }
 
     // 복사 포맷 생성 및 클립보드 복사
-    function formatEntryLine(e, multiline = false){
+    function formatEntryLine(e){
       const label = e.shiftLabel ? ` (${e.shiftLabel})` : '';
-      if(!multiline){
-        return `${e.date}${label} | 배민:${formatNum(e.baemin)}원 | 쿠팡:${formatNum(e.coupang)}원 | 땡겨요:${formatNum(e.ttaeng)}원 | 홀:${formatNum(e.hall)}원 | 총합:${formatNum(e.total)}원`;
-      }
-      // multiline block (요청된 포맷: 헤더 다음 빈 줄, 항목들, 총합 앞 빈 줄)
-      return `${e.date}${label}\n\n배민: ${formatNum(e.baemin)}원\n쿠팡: ${formatNum(e.coupang)}원\n땡겨요: ${formatNum(e.ttaeng)}원\n홀: ${formatNum(e.hall)}원\n\n총합: ${formatNum(e.total)}원`;
+      return `${e.date}${label} | 배민:${e.baemin}원 | 쿠팡:${e.coupang}원 | 땡겨요:${e.ttaeng}원 | 홀:${e.hall}원 | 총합:${e.total}원`;
     }
     async function copyEntryText(e){
-      // 각 항목을 줄바꿈해서 복사
-      const text = formatEntryLine(e, true);
+      const text = formatEntryLine(e);
       try{ await navigator.clipboard.writeText(text); showMsg('클립보드에 복사되었습니다.'); }
       catch(err){ fallbackCopy(text); }
     }
@@ -272,13 +273,16 @@
       if(!arr.length){ showMsg('복사할 이력이 없습니다.'); return; }
       const lines = [];
       arr.forEach(entry => {
-        if(entry.lunch) lines.push(formatEntryLine({ date: entry.date, shiftLabel: '런치', ...entry.lunch }, true));
+        if(entry.lunch) lines.push(formatEntryLine({ date: entry.date, shiftLabel: '런치', ...entry.lunch }));
         if(entry.dinner){
-          lines.push(formatEntryLine({ date: entry.date, shiftLabel: '디너', ...entry.dinner }, true));
+          const lb = entry.lunch || {baemin:0,coupang:0,ttaeng:0,hall:0,total:0};
+          const db = entry.dinner;
+          const cum = { date: entry.date, shiftLabel: '디너(누적)', baemin: (Number(lb.baemin)||0)+(Number(db.baemin)||0), coupang: (Number(lb.coupang)||0)+(Number(db.coupang)||0), ttaeng: (Number(lb.ttaeng)||0)+(Number(db.ttaeng)||0), hall: (Number(lb.hall)||0)+(Number(db.hall)||0) };
+          cum.total = cum.baemin + cum.coupang + cum.ttaeng + cum.hall;
+          lines.push(formatEntryLine(cum));
         }
       });
-      // 항목별로 블록을 구분하기 위해 빈 줄로 구분
-      const text = lines.join('\n\n');
+      const text = lines.join('\n');
       try{ await navigator.clipboard.writeText(text); showMsg('전체 이력이 클립보드에 복사되었습니다.'); }
       catch(err){ fallbackCopy(text); }
     }
@@ -288,10 +292,10 @@
     let msgTimeout = null;
     function showMsg(t){ clearTimeout(msgTimeout); msg.textContent = t; msg.classList.add('suc'); msgTimeout = setTimeout(()=>{ msg.textContent=''; msg.classList.remove('suc'); }, 2200); }
 
-    // 입력 변화 -> 총합 및 미리보기(런치·디너) 갱신
+    // 입력 변화 -> 총합 및 누적 표시 갱신
     [baeminEl, coupangEl, ttaengEl, hallEl].forEach(inp => inp.addEventListener('input', ()=>{
       calcTotal();
-      // 미리보기가 보일 때도 갱신
+      // 누적표시가 보일 때도 갱신
       if(shiftEl.value === 'dinner') updateCumulativePreview();
     }));
 
@@ -311,10 +315,14 @@
       }
     }
     function updateCumulativePreview(){
-      // 선택된 타임(디너) 입력값만 단독 표시
-      const cur = { baemin: Number(baeminEl.value)||0, coupang: Number(coupangEl.value)||0, ttaeng: Number(ttaengEl.value)||0, hall: Number(hallEl.value)||0 };
-      const total = cur.baemin + cur.coupang + cur.ttaeng + cur.hall;
-      cumulativeEl.innerHTML = `디너(입력): 배민 ${formatNum(cur.baemin)}원 · 쿠팡 ${formatNum(cur.coupang)}원 · 땡겨요 ${formatNum(cur.ttaeng)}원 · 홀 ${formatNum(cur.hall)}원 · 총합 ${formatNum(total)}원`;
+      const date = dateEl.value || (new Date()).toISOString().slice(0,10);
+      const arr = loadEntries();
+      const entry = findEntry(arr, date) || {};
+      const lb = entry.lunch || {baemin:0,coupang:0,ttaeng:0,hall:0,total:0};
+      const curDinner = { baemin: Number(baeminEl.value)||0, coupang: Number(coupangEl.value)||0, ttaeng: Number(ttaengEl.value)||0, hall: Number(hallEl.value)||0 };
+      const cum = { baemin: (Number(lb.baemin)||0) + curDinner.baemin, coupang: (Number(lb.coupang)||0) + curDinner.coupang, ttaeng: (Number(lb.ttaeng)||0) + curDinner.ttaeng, hall: (Number(lb.hall)||0) + curDinner.hall };
+      cum.total = cum.baemin + cum.coupang + cum.ttaeng + cum.hall;
+      cumulativeEl.innerHTML = `누적(런치+디너): 배민 ${formatNum(cum.baemin)}원 · 쿠팡 ${formatNum(cum.coupang)}원 · 땡겨요 ${formatNum(cum.ttaeng)}원 · 홀 ${formatNum(cum.hall)}원 · 총합 ${formatNum(cum.total)}원`;
       cumulativeEl.style.display = '';
     }
 
@@ -359,13 +367,6 @@
 
     // 초기화 및 로드
     (function init(){ setToday(); shiftEl.value = 'lunch'; calcTotal(); renderTable(); })();
-
-    // PWA: 서비스워커 등록 (localhost는 HTTPS 없이도 동작)
-    if('serviceWorker' in navigator){
-      navigator.serviceWorker.register('/sw.js')
-        .then(() => console.log('service worker registered'))
-        .catch(err => console.warn('SW registration failed:', err));
-    }
   </script>
 </body>
 </html>

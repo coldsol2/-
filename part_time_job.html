@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>알바 매출 정리 도구 — part_time_job</title>
+  <style>
+    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;max-width:980px;margin:24px auto;color:#222}
+    h1{margin:0 0 12px;font-size:20px}
+    .card{background:#fff;border:1px solid #e6e6e6;padding:16px;border-radius:8px;box-shadow:0 1px 0 rgba(0,0,0,0.03)}
+    label{display:block;margin:8px 0 4px;font-size:13px}
+    input[type=number], input[type=date], input[type=text]{padding:8px;border:1px solid #ccc;border-radius:4px;width:140px}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+    .controls{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+    button{background:#0366d6;color:#fff;border:0;padding:8px 12px;border-radius:6px;cursor:pointer}
+    button.ghost{background:#f1f1f1;color:#111;border:1px solid #ddd}
+    button.danger{background:#d9534f}
+    table{width:100%;border-collapse:collapse;margin-top:14px;font-size:14px}
+    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
+    th{background:#fafafa;font-weight:600}
+    .muted{color:#666;font-size:13px}
+    .right{text-align:right}
+    .notice{background:#fffbea;border:1px solid #ffe08a;padding:8px;margin:12px 0;border-radius:6px;color:#6a4f00}
+    .small{font-size:13px;color:#555}
+    .suc{color:green;margin-left:8px;font-weight:600}
+    @media(max-width:640px){.row{flex-direction:column;align-items:stretch}input[type=number],input[type=date]{width:100%}}
+  </style>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0366d6">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="매출정리">
+  <link rel="apple-touch-icon" href="/img/module_table_top.png">
+</head>
+<body>
+  <h1>알바 매출 간편 정리 도구</h1>
+  <div class="card">
+    <p class="small">날짜별로 배민 · 쿠팡 · 땡겨요 · 홀 매출을 입력하면 총합을 자동 계산하고 브라우저에 저장합니다. 런치와 디너는 각각 별도로 입력·표기됩니다.</p>
+
+    <div style="margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+      <div>
+        <label for="date">날짜</label>
+        <input id="date" type="date">
+      </div>
+      <div>
+        <label for="shift">타임</label>
+        <select id="shift" style="padding:8px;border:1px solid #ccc;border-radius:4px">
+          <option value="lunch">런치</option>
+          <option value="dinner">디너</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <div>
+        <label for="baemin">배민 매출 (원)</label>
+        <input id="baemin" type="number" min="0" step="1" value="0">
+      </div>
+
+      <div>
+        <label for="coupang">쿠팡 매출 (원)</label>
+        <input id="coupang" type="number" min="0" step="1" value="0">
+      </div>
+
+      <div>
+        <label for="ttaeng">땡겨요 매출 (원)</label>
+        <input id="ttaeng" type="number" min="0" step="1" value="0">
+      </div>
+
+      <div>
+        <label for="hall">홀 매출 (원)</label>
+        <input id="hall" type="number" min="0" step="1" value="0">
+      </div>
+
+      <div>
+        <label for="total">총합 (원)</label>
+        <input id="total" type="text" readonly value="0">
+      </div>
+    </div>
+
+    <div id="cumulative" class="small" style="display:none;margin-top:8px"></div>
+
+    <div class="controls">
+      <button id="saveBtn">저장</button>
+      <button id="resetBtn" class="ghost">입력 초기화</button>
+      <button id="copyAllBtn" class="ghost">전체 이력 복사</button>
+      <button id="clearAllBtn" class="danger">전체 이력 삭제</button>
+      <span id="msg" class="muted"></span>
+    </div>
+
+    <div class="notice" style="display:none" id="emptyNotice">저장된 이력이 없습니다. 새 항목을 추가하세요.</div>
+
+    <table id="historyTable" style="display:none">
+      <thead>
+        <tr>
+          <th>날짜</th>
+          <th>배민</th>
+          <th>쿠팡</th>
+          <th>땡겨요</th>
+          <th>홀</th>
+          <th class="right">총합</th>
+          <th>액션</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <p class="small" style="margin-top:12px">사용법: 값 입력 → <strong>저장</strong> → 표에서 복사 아이콘 클릭 또는 <strong>전체 이력 복사</strong>. 로컬(브라우저)에만 저장됩니다.</p>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'part_time_job_entries_v1'; // unchanged key; data schema upgraded in code
+
+    // 요소 참조
+    const dateEl = document.getElementById('date');
+    const shiftEl = document.getElementById('shift');
+    const baeminEl = document.getElementById('baemin');
+    const coupangEl = document.getElementById('coupang');
+    const ttaengEl = document.getElementById('ttaeng');
+    const hallEl = document.getElementById('hall');
+    const totalEl = document.getElementById('total');
+    const cumulativeEl = document.getElementById('cumulative');
+    const saveBtn = document.getElementById('saveBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const copyAllBtn = document.getElementById('copyAllBtn');
+    const clearAllBtn = document.getElementById('clearAllBtn');
+    const msg = document.getElementById('msg');
+    const historyTable = document.getElementById('historyTable');
+    const historyTbody = historyTable.querySelector('tbody');
+    const emptyNotice = document.getElementById('emptyNotice');
+
+    // 초기 날짜 설정 (오늘)
+    function setToday() {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      dateEl.value = `${yyyy}-${mm}-${dd}`;
+    }
+
+    // 총합 계산 (현재 입력값 기준)
+    function calcTotal() {
+      const nums = [baeminEl.value, coupangEl.value, ttaengEl.value, hallEl.value].map(v => Number(v) || 0);
+      const sum = nums.reduce((a,b)=>a+b,0);
+      totalEl.value = String(sum);
+      return sum;
+    }
+
+    // 저장 불러오기/쓰기 (마이그레이션 포함)
+    function loadEntries(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(!raw) return [];
+        const parsed = JSON.parse(raw);
+        if(!Array.isArray(parsed)) return [];
+        // old flat-format migration: {date, baemin, coupang, ttaeng, hall, total} => lunch
+        if(parsed.length && parsed[0].hasOwnProperty('baemin') && !parsed[0].hasOwnProperty('lunch')){
+          const migrated = parsed.map(e => ({ date: e.date, lunch: { baemin: e.baemin||0, coupang: e.coupang||0, ttaeng: e.ttaeng||0, hall: e.hall||0, total: e.total||0 }, dinner: null }));
+          saveEntries(migrated);
+          return migrated;
+        }
+        return parsed;
+      }catch(e){ console.error(e); return []; }
+    }
+    function saveEntries(arr){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+    }
+
+    // 유틸: 날짜로 항목 찾기
+    function findEntry(arr, date){ return arr.find(x => x.date === date); }
+
+    // 렌더링: 날짜별로 런치/디너 행 표시
+    function renderTable(){
+      const entries = loadEntries();
+      historyTbody.innerHTML = '';
+      if(!entries.length){ historyTable.style.display = 'none'; emptyNotice.style.display = 'block'; return; }
+      historyTable.style.display = ''; emptyNotice.style.display = 'none';
+
+      entries.forEach((e, idx) => {
+        // 런치 행
+        if(e.lunch){
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${e.date} (런치)</td>
+            <td>${formatNum(e.lunch.baemin)}</td>
+            <td>${formatNum(e.lunch.coupang)}</td>
+            <td>${formatNum(e.lunch.ttaeng)}</td>
+            <td>${formatNum(e.lunch.hall)}</td>
+            <td class="right">${formatNum(e.lunch.total)}</td>
+            <td>
+              <button data-idx="${idx}" data-shift="lunch" class="ghost rowCopy">복사</button>
+              <button data-idx="${idx}" data-shift="lunch" class="danger rowDel">삭제</button>
+            </td>
+          `;
+          historyTbody.appendChild(tr);
+        }
+
+        // 디너 행 — 디너는 런치와 별도로 표시
+        if(e.dinner){
+          const db = e.dinner;
+          const tr2 = document.createElement('tr');
+          tr2.innerHTML = `
+            <td>${e.date} (디너)</td>
+            <td>${formatNum(db.baemin)}</td>
+            <td>${formatNum(db.coupang)}</td>
+            <td>${formatNum(db.ttaeng)}</td>
+            <td>${formatNum(db.hall)}</td>
+            <td class="right">${formatNum(db.total)}</td>
+            <td>
+              <button data-idx="${idx}" data-shift="dinner" class="ghost rowCopy">복사</button>
+              <button data-idx="${idx}" data-shift="dinner" class="danger rowDel">삭제</button>
+            </td>
+          `;
+          historyTbody.appendChild(tr2);
+        }
+      });
+
+      // 바인딩: 복사 / 삭제 (각 행에 data-shift 포함)
+      historyTbody.querySelectorAll('.rowCopy').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.idx);
+          const shift = btn.dataset.shift;
+          const arr = loadEntries();
+          const entry = arr[idx];
+          if(!entry) return;
+          if(shift === 'lunch' && entry.lunch) copyEntryText({ date: entry.date, shiftLabel: '런치', ...entry.lunch });
+          if(shift === 'dinner' && entry.dinner){
+            copyEntryText({ date: entry.date, shiftLabel: '디너', ...entry.dinner });
+          }
+        };
+      });
+
+      historyTbody.querySelectorAll('.rowDel').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.idx);
+          const shift = btn.dataset.shift;
+          if(!confirm('정말 이 항목을 삭제하시겠습니까?')) return;
+          const arr = loadEntries();
+          const entry = arr[idx];
+          if(!entry) return;
+          if(shift === 'lunch') entry.lunch = null;
+          if(shift === 'dinner') entry.dinner = null;
+          // 둘 다 비어있으면 항목 자체 삭제
+          if(!entry.lunch && !entry.dinner) arr.splice(idx,1);
+          saveEntries(arr);
+          renderTable();
+          showMsg('삭제되었습니다.');
+        };
+      });
+    }
+
+    // 숫자 포맷 (천 단위)
+    function formatNum(n){ return Number(n).toLocaleString('ko-KR'); }
+
+    // 복사 포맷 생성 및 클립보드 복사
+    function formatEntryLine(e, multiline = false){
+      const label = e.shiftLabel ? ` (${e.shiftLabel})` : '';
+      if(!multiline){
+        return `${e.date}${label} | 배민:${formatNum(e.baemin)}원 | 쿠팡:${formatNum(e.coupang)}원 | 땡겨요:${formatNum(e.ttaeng)}원 | 홀:${formatNum(e.hall)}원 | 총합:${formatNum(e.total)}원`;
+      }
+      // multiline block (요청된 포맷: 헤더 다음 빈 줄, 항목들, 총합 앞 빈 줄)
+      return `${e.date}${label}\n\n배민: ${formatNum(e.baemin)}원\n쿠팡: ${formatNum(e.coupang)}원\n땡겨요: ${formatNum(e.ttaeng)}원\n홀: ${formatNum(e.hall)}원\n\n총합: ${formatNum(e.total)}원`;
+    }
+    async function copyEntryText(e){
+      // 각 항목을 줄바꿈해서 복사
+      const text = formatEntryLine(e, true);
+      try{ await navigator.clipboard.writeText(text); showMsg('클립보드에 복사되었습니다.'); }
+      catch(err){ fallbackCopy(text); }
+    }
+    async function copyAllText(){
+      const arr = loadEntries();
+      if(!arr.length){ showMsg('복사할 이력이 없습니다.'); return; }
+      const lines = [];
+      arr.forEach(entry => {
+        if(entry.lunch) lines.push(formatEntryLine({ date: entry.date, shiftLabel: '런치', ...entry.lunch }, true));
+        if(entry.dinner){
+          lines.push(formatEntryLine({ date: entry.date, shiftLabel: '디너', ...entry.dinner }, true));
+        }
+      });
+      // 항목별로 블록을 구분하기 위해 빈 줄로 구분
+      const text = lines.join('\n\n');
+      try{ await navigator.clipboard.writeText(text); showMsg('전체 이력이 클립보드에 복사되었습니다.'); }
+      catch(err){ fallbackCopy(text); }
+    }
+    function fallbackCopy(text){ const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); showMsg('복사되었습니다. (대체 방법)'); } catch(e){ alert('복사할 수 없습니다. 브라우저 권한을 확인하세요.'); } ta.remove(); }
+
+    // 메시지 표시
+    let msgTimeout = null;
+    function showMsg(t){ clearTimeout(msgTimeout); msg.textContent = t; msg.classList.add('suc'); msgTimeout = setTimeout(()=>{ msg.textContent=''; msg.classList.remove('suc'); }, 2200); }
+
+    // 입력 변화 -> 총합 및 미리보기(런치·디너) 갱신
+    [baeminEl, coupangEl, ttaengEl, hallEl].forEach(inp => inp.addEventListener('input', ()=>{
+      calcTotal();
+      // 미리보기가 보일 때도 갱신
+      if(shiftEl.value === 'dinner') updateCumulativePreview();
+    }));
+
+    // 날짜 또는 타임 변경 시 폼에 기존값 불러오기
+    function updateFormForDateShift(){
+      const date = dateEl.value || (new Date()).toISOString().slice(0,10);
+      const shift = shiftEl.value;
+      const arr = loadEntries();
+      const entry = findEntry(arr, date);
+      if(!entry){ baeminEl.value = coupangEl.value = ttaengEl.value = hallEl.value = 0; calcTotal(); cumulativeEl.style.display = 'none'; return; }
+      if(shift === 'lunch'){
+        const l = entry.lunch || {baemin:0,coupang:0,ttaeng:0,hall:0,total:0};
+        baeminEl.value = l.baemin; coupangEl.value = l.coupang; ttaengEl.value = l.ttaeng; hallEl.value = l.hall; calcTotal(); cumulativeEl.style.display = 'none';
+      }else{
+        const d = entry.dinner || {baemin:0,coupang:0,ttaeng:0,hall:0,total:0};
+        baeminEl.value = d.baemin; coupangEl.value = d.coupang; ttaengEl.value = d.ttaeng; hallEl.value = d.hall; calcTotal(); updateCumulativePreview();
+      }
+    }
+    function updateCumulativePreview(){
+      // 선택된 타임(디너) 입력값만 단독 표시
+      const cur = { baemin: Number(baeminEl.value)||0, coupang: Number(coupangEl.value)||0, ttaeng: Number(ttaengEl.value)||0, hall: Number(hallEl.value)||0 };
+      const total = cur.baemin + cur.coupang + cur.ttaeng + cur.hall;
+      cumulativeEl.innerHTML = `디너(입력): 배민 ${formatNum(cur.baemin)}원 · 쿠팡 ${formatNum(cur.coupang)}원 · 땡겨요 ${formatNum(cur.ttaeng)}원 · 홀 ${formatNum(cur.hall)}원 · 총합 ${formatNum(total)}원`;
+      cumulativeEl.style.display = '';
+    }
+
+    // 저장 버튼 (런치/디너 분리 저장)
+    saveBtn.addEventListener('click', ()=>{
+      const date = dateEl.value || (new Date()).toISOString().slice(0,10);
+      const shift = shiftEl.value; // 'lunch' | 'dinner'
+      const baemin = Number(baeminEl.value) || 0;
+      const coupang = Number(coupangEl.value) || 0;
+      const ttaeng = Number(ttaengEl.value) || 0;
+      const hall = Number(hallEl.value) || 0;
+      const total = baemin + coupang + ttaeng + hall;
+      const shiftObj = { baemin, coupang, ttaeng, hall, total };
+      const arr = loadEntries();
+      let entry = findEntry(arr, date);
+      if(!entry){ entry = { date, lunch: null, dinner: null }; arr.unshift(entry); }
+      if(entry[shift]){
+        if(!confirm(`${date} ${shift==='lunch'?'런치':'디너'} 항목이 이미 있습니다. 덮어쓰시겠습니까?`)) return;
+      }
+      entry[shift] = shiftObj;
+      saveEntries(arr);
+      renderTable();
+      showMsg('저장되었습니다.');
+    });
+
+    resetBtn.addEventListener('click', ()=>{
+      setToday(); baeminEl.value = coupangEl.value = ttaengEl.value = hallEl.value = 0; calcTotal(); cumulativeEl.style.display = 'none';
+    });
+
+    copyAllBtn.addEventListener('click', copyAllText);
+
+    clearAllBtn.addEventListener('click', ()=>{
+      if(!confirm('모든 이력을 완전히 삭제합니다. 계속할까요?')) return;
+      saveEntries([]);
+      renderTable();
+      showMsg('모든 이력이 삭제되었습니다.');
+    });
+
+    // 날짜/타임 변경 시 폼 갱신
+    dateEl.addEventListener('change', updateFormForDateShift);
+    shiftEl.addEventListener('change', updateFormForDateShift);
+
+    // 초기화 및 로드
+    (function init(){ setToday(); shiftEl.value = 'lunch'; calcTotal(); renderTable(); })();
+
+    // PWA: 서비스워커 등록 (localhost는 HTTPS 없이도 동작)
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('/sw.js')
+        .then(() => console.log('service worker registered'))
+        .catch(err => console.warn('SW registration failed:', err));
+    }
+  </script>
+</body>
+</html>
